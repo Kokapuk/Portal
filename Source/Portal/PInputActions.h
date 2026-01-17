@@ -23,4 +23,7 @@ public:
 
 	UPROPERTY(EditDefaultsOnly)
 	UInputAction* CrouchAction;
+	
+	UPROPERTY(EditDefaultsOnly)
+	UInputAction* FireAction;
 };

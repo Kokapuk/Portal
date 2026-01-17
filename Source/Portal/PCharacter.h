@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "PPortalGunComponent.h"
 #include "GameFramework/Character.h"
 #include "PCharacter.generated.h"
 
@@ -29,19 +30,13 @@ public:
 	virtual void OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
 
 	UFUNCTION(BlueprintPure)
+	UCameraComponent* GetCamera() const { return Camera; }
+
+	UFUNCTION(BlueprintPure)
 	USkeletalMeshComponent* GetArmsMesh() const { return ArmsMesh; }
 
 	UFUNCTION(BlueprintPure)
 	UPPortalGunComponent* GetPortalGunComponent() const { return PortalGunComponent; }
-
-	UFUNCTION(BlueprintPure)
-	USkeletalMeshComponent* GetFirstPersonWeaponMesh() const { return FirstPersonWeaponMesh; }
-
-	UFUNCTION(BlueprintPure)
-	USkeletalMeshComponent* GetThirdPersonWeaponMesh() const { return ThirdPersonWeaponMesh; }
-
-	UFUNCTION(BlueprintPure)
-	UCameraComponent* GetCamera() const { return Camera; }
 
 protected:
 	UPROPERTY(EditDefaultsOnly)
@@ -55,23 +50,16 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly)
 	USkeletalMeshComponent* ArmsMesh;
-	
+
 	UPROPERTY(EditDefaultsOnly)
 	UPPortalGunComponent* PortalGunComponent;
-
-	UPROPERTY(EditDefaultsOnly)
-	USkeletalMeshComponent* FirstPersonWeaponMesh;
-
-	UPROPERTY(EditDefaultsOnly)
-	USkeletalMeshComponent* ThirdPersonWeaponMesh;
 
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 	virtual bool CanJumpInternal_Implementation() const override;
 
 	void Look(const FInputActionValue& Value);
 	void Move(const FInputActionValue& Value);
-	void MoveForward(const float Value) { AddMovementInput(GetActorForwardVector(), Value); };
-	void MoveRight(const float Value) { AddMovementInput(GetActorRightVector(), Value); };
+	void Fire(const FInputActionValue& Value);
 
 private:
 	float TargetCameraHeight;

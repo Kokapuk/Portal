@@ -44,16 +44,6 @@ APCharacter::APCharacter(const FObjectInitializer& ObjectInitializer)
 	ArmsMesh->CastShadow = false;
 
 	PortalGunComponent = CreateDefaultSubobject<UPPortalGunComponent>("PortalGunComponent");
-
-	FirstPersonWeaponMesh = CreateDefaultSubobject<USkeletalMeshComponent>("FirstPersonGunMesh");
-	FirstPersonWeaponMesh->SetupAttachment(ArmsMesh);
-	FirstPersonWeaponMesh->SetOnlyOwnerSee(true);
-	FirstPersonWeaponMesh->bCastDynamicShadow = false;
-	FirstPersonWeaponMesh->CastShadow = false;
-
-	ThirdPersonWeaponMesh = CreateDefaultSubobject<USkeletalMeshComponent>("ThirdPersonGunMesh");
-	ThirdPersonWeaponMesh->SetOwnerNoSee(true);
-	ThirdPersonWeaponMesh->SetupAttachment(GetMesh());
 }
 
 void APCharacter::OnConstruction(const FTransform& Transform)
@@ -61,10 +51,6 @@ void APCharacter::OnConstruction(const FTransform& Transform)
 	Super::OnConstruction(Transform);
 
 	Camera->SetRelativeLocation(FVector(0.f, 0.f, BaseEyeHeight));
-	FirstPersonWeaponMesh->AttachToComponent(ArmsMesh, FAttachmentTransformRules(EAttachmentRule::SnapToTarget, true),
-	                                         "GripPoint");
-	ThirdPersonWeaponMesh->AttachToComponent(GetMesh(), FAttachmentTransformRules(EAttachmentRule::SnapToTarget, true),
-	                                         "GripPoint");
 }
 
 void APCharacter::Tick(float DeltaSeconds)
@@ -99,6 +85,7 @@ void APCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponen
 	check(IsValid(InputActions->MoveAction))
 	check(IsValid(InputActions->JumpAction))
 	check(IsValid(InputActions->CrouchAction))
+	check(IsValid(InputActions->FireAction))
 
 	const APlayerController* PlayerController = Cast<APlayerController>(GetController());
 	UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(
@@ -118,6 +105,8 @@ void APCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponen
 
 	Input->BindAction(InputActions->CrouchAction, ETriggerEvent::Started, this, &APCharacter::Crouch, false);
 	Input->BindAction(InputActions->CrouchAction, ETriggerEvent::Completed, this, &APCharacter::UnCrouch, false);
+
+	Input->BindAction(InputActions->FireAction, ETriggerEvent::Started, this, &APCharacter::Fire);
 }
 
 bool APCharacter::CanJumpInternal_Implementation() const
@@ -139,4 +128,12 @@ void APCharacter::Move(const FInputActionValue& Value)
 
 	AddMovementInput(GetActorForwardVector(), AxisValue.X);
 	AddMovementInput(GetActorRightVector(), AxisValue.Y);
+}
+
+void APCharacter::Fire(const FInputActionValue& Value)
+{
+	const float AxisValue = Value.Get<float>();
+
+	if (AxisValue > 0) PortalGunComponent->CosmeticFire(0);
+	else PortalGunComponent->CosmeticFire(1);
 }

@@ -20,13 +20,13 @@ APCharacter::APCharacter(const FObjectInitializer& ObjectInitializer)
 
 	UCapsuleComponent* Capsule = GetCapsuleComponent();
 	Capsule->SetCapsuleHalfHeight(96.f);
-	Capsule->SetCapsuleRadius(55.f);
+	Capsule->SetCapsuleRadius(40.f);
 
 	USkeletalMeshComponent* CharacterMesh = GetMesh();
 	CharacterMesh->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
 	CharacterMesh->SetRelativeLocation(FVector(0.f, 0.f, -Capsule->GetScaledCapsuleHalfHeight()));
 	CharacterMesh->SetOwnerNoSee(true);
-	CharacterMesh->SetGenerateOverlapEvents(true);
+	CharacterMesh->SetGenerateOverlapEvents(false);
 	CharacterMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 
 	Camera = CreateDefaultSubobject<UCameraComponent>("Camera");

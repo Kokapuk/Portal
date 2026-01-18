@@ -1,6 +1,7 @@
 #include "PPortal.h"
 
 #include "Components/ArrowComponent.h"
+#include "Components/BoxComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Net/UnrealNetwork.h"
@@ -8,35 +9,58 @@
 APPortal::APPortal()
 {
 	PrimaryActorTick.bCanEverTick = true;
-	PrimaryActorTick.TickGroup = TG_PostUpdateWork;
-	
+
+	PostPostUpdateWorkTick.bCanEverTick = true;
+	PostPostUpdateWorkTick.TickGroup = TG_PostUpdateWork;
+	PostPostUpdateWorkTick.Target = this;
+
 	SetReplicates(true);
 
+	TeleportationThreshold = 0.002f;
+
 	RootComponent = Mesh = CreateDefaultSubobject<UStaticMeshComponent>("Mesh");
+	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	SceneCaptureComponent = CreateDefaultSubobject<USceneCaptureComponent2D>("USceneCaptureComponent");
 	SceneCaptureComponent->SetupAttachment(RootComponent);
 	SceneCaptureComponent->FOVAngle = 103.f;
 	SceneCaptureComponent->bEnableClipPlane = true;
 	SceneCaptureComponent->bAlwaysPersistRenderingState = true;
+	SceneCaptureComponent->bCaptureEveryFrame = false;
+	SceneCaptureComponent->bCaptureOnMovement = false;
 
 	Entrance = CreateDefaultSubobject<UArrowComponent>("Entrance");
 	Entrance->SetupAttachment(RootComponent);
 	Entrance->SetRelativeRotation(FRotator(0.0f, 180.0f, 0.0f));
 	Entrance->SetHiddenInSceneCapture(true);
+
+	Trigger = CreateDefaultSubobject<UBoxComponent>("Trigger");
+	Trigger->SetupAttachment(RootComponent);
+	Trigger->SetCollisionResponseToAllChannels(ECR_Ignore);
 }
 
 void APPortal::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
+	DOREPLIFETIME(APPortal, Surface);
 	DOREPLIFETIME(APPortal, LinkedPortal);
+	DOREPLIFETIME(APPortal, EmptyMaterial);
 }
 
 void APPortal::BeginPlay()
 {
 	Super::BeginPlay();
+
+	if (!HasAnyFlags(RF_ClassDefaultObject))
+	{
+		PostPostUpdateWorkTick.RegisterTickFunction(GetLevel());
+	}
+
 	SetupDynamicTarget();
+
+	Trigger->OnComponentBeginOverlap.AddDynamic(this, &APPortal::OnTriggerBeginOverlap);
+	Trigger->OnComponentEndOverlap.AddDynamic(this, &APPortal::OnTriggerEndOverlap);
 }
 
 void APPortal::SetupDynamicTarget()
@@ -46,7 +70,7 @@ void APPortal::SetupDynamicTarget()
 	FVector2D ViewportSize;
 	GEngine->GameViewport->GetViewportSize(ViewportSize);
 	RenderTarget->InitCustomFormat(ViewportSize.X, ViewportSize.Y, PF_FloatRGBA, true);
-	
+
 	RenderTarget->ClearColor = FLinearColor::Black;
 }
 
@@ -91,6 +115,57 @@ void APPortal::UpdateCamera()
 	SceneCaptureComponent->ClipPlaneBase = PlaneLocation;
 }
 
+void APPortal::CheckPortalTransition()
+{
+	TArray<AActor*> ActorsInTrigger;
+	Trigger->GetOverlappingActors(ActorsInTrigger);
+
+	for (AActor* Actor : ActorsInTrigger)
+	{
+		FVector ActorRelativePos = GetTransform().
+			InverseTransformPosition(Actor->GetActorLocation());
+
+		if (ActorRelativePos.X < TeleportationThreshold)
+		{
+			FVector NewLocation = LinkedPortal->GetActorLocation() + (LinkedPortal->GetActorForwardVector() *
+				TeleportationThreshold) + (LinkedPortal->GetActorRightVector() * -ActorRelativePos.Y) + (
+				LinkedPortal->
+				GetActorUpVector() * ActorRelativePos.Z);
+
+			FRotator RelativeRotation = Entrance->GetComponentTransform().InverseTransformRotation(
+				Actor->GetActorRotation().Quaternion()).Rotator();
+
+			FRotator NewRotation = GetWorld()->GetFirstPlayerController()->GetControlRotation();
+
+			GetWorld()->GetFirstPlayerController()->SetControlRotation(FRotator(
+				NewRotation.Pitch, LinkedPortal->GetActorRotation().Yaw + RelativeRotation.Yaw, NewRotation.Roll));
+			Actor->SetActorLocation(NewLocation);
+		}
+	}
+}
+
+void APPortal::OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+                                     UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep,
+                                     const FHitResult& SweepResult)
+{
+	check(IsValid(Surface));
+	Surface->SetActorEnableCollision(false);
+	if (IsValid(LinkedPortal)) LinkedPortal->GetSurface()->SetActorEnableCollision(false);
+}
+
+void APPortal::OnTriggerEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+                                   UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+	check(IsValid(Surface));
+	Surface->SetActorEnableCollision(true);
+	if (IsValid(LinkedPortal)) LinkedPortal->GetSurface()->SetActorEnableCollision(true);
+}
+
+void APPortal::OnRep_Surface()
+{
+	Trigger->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+}
+
 void APPortal::OnRep_LinkedPortal()
 {
 	if (IsValid(LinkedPortal))
@@ -108,7 +183,22 @@ void APPortal::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	UpdateCamera();
+	CheckPortalTransition();
+}
+
+void FPostUpdateWorkTickFunction::ExecuteTick(float DeltaTime, ELevelTick TickType, ENamedThreads::Type CurrentThread,
+                                              const FGraphEventRef& MyCompletionGraphEvent)
+{
+	Target->UpdateCamera();
+	Target->GetSceneCaptureComponent()->CaptureScene();
+}
+
+void APPortal::AuthSetSurface(AActor* NewSurface)
+{
+	if (!HasAuthority()) return;
+
+	Surface = NewSurface;
+	OnRep_Surface();
 }
 
 void APPortal::AuthSetLinkedPortal(APPortal* NewLinkedPortal)

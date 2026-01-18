@@ -4,7 +4,16 @@
 #include "GameFramework/Actor.h"
 #include "PPortal.generated.h"
 
+class APPortal;
+class UBoxComponent;
 class UArrowComponent;
+
+struct FPostUpdateWorkTickFunction : FTickFunction
+{
+	APPortal* Target;
+	virtual void ExecuteTick(float DeltaTime, ELevelTick TickType, ENamedThreads::Type CurrentThread,
+	                         const FGraphEventRef& MyCompletionGraphEvent) override;
+};
 
 UCLASS()
 class PORTAL_API APPortal : public AActor
@@ -19,14 +28,25 @@ public:
 
 	void AuthSetLinkedPortal(APPortal* NewLinkedPortal);
 	void AuthSetEmptyMaterial(UMaterial* NewEmptyMaterial);
+	void AuthSetSurface(AActor* NewSurface);
 
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintPure)
 	USceneCaptureComponent2D* GetSceneCaptureComponent() const { return SceneCaptureComponent; }
 
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintPure)
 	UArrowComponent* GetEntrance() const { return Entrance; }
 
+	UFUNCTION(BlueprintPure)
+	AActor* GetSurface() const { return Surface; }
+
+	void UpdateCamera();
+
 protected:
+	FPostUpdateWorkTickFunction PostPostUpdateWorkTick;
+
+	UPROPERTY(EditDefaultsOnly, meta=(ClampMin=0.f, ClampMax=1.f))
+	float TeleportationThreshold;
+
 	UPROPERTY(EditDefaultsOnly)
 	UStaticMeshComponent* Mesh;
 
@@ -35,6 +55,12 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly)
 	UArrowComponent* Entrance;
+
+	UPROPERTY(EditDefaultsOnly)
+	UBoxComponent* Trigger;
+
+	UPROPERTY(ReplicatedUsing=OnRep_Surface)
+	AActor* Surface;
 
 	UPROPERTY(ReplicatedUsing=OnRep_LinkedPortal)
 	APPortal* LinkedPortal;
@@ -46,11 +72,22 @@ protected:
 
 	void SetupDynamicTarget();
 	void UpdateMaterial() const;
-	void UpdateCamera();
+	void CheckPortalTransition();
 
 private:
 	UPROPERTY()
 	UTextureRenderTarget2D* RenderTarget;
+
+	UFUNCTION()
+	void OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp,
+	                           int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
+	UFUNCTION()
+	void OnTriggerEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp,
+	                         int32 OtherBodyIndex);
+
+	UFUNCTION()
+	void OnRep_Surface();
 
 	UFUNCTION()
 	void OnRep_LinkedPortal();

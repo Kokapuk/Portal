@@ -116,8 +116,18 @@ void UPPortalGunComponent::ServerFire_Implementation(const FHitResult& HitResult
 			if (IsValid(LinkedPortal)) LinkedPortal->AuthSetLinkedPortal(Portal);
 		}
 
-		Portal->SetActorLocation(HitResult.Location + HitResult.ImpactNormal);
+		FTransform WorldGridTransform(HitResult.ImpactNormal.Rotation(), FVector::ZeroVector);
+		FVector RelativeToWorldOrigin = WorldGridTransform.InverseTransformPosition(HitResult.Location);
+		FVector SnappedLocal(
+			RelativeToWorldOrigin.X,
+			FMath::GridSnap(RelativeToWorldOrigin.Y, 100.f),
+			FMath::GridSnap(RelativeToWorldOrigin.Z, 100.f)
+		);
+		FVector FinalWorldLocation = WorldGridTransform.TransformPosition(SnappedLocal);
+		Portal->SetActorLocation(FinalWorldLocation + (HitResult.ImpactNormal * 0.1f));
+
 		Portal->SetActorRotation(HitResult.ImpactNormal.Rotation());
+		Portal->AuthSetSurface(HitActor);
 	}
 
 	MultiFire();

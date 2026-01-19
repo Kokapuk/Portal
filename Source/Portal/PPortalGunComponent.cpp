@@ -35,6 +35,7 @@ void UPPortalGunComponent::BeginPlay()
 	ThirdPersonMeshComponent->RegisterComponent();
 
 	FirstPersonMeshComponent->SetCastShadow(false);
+	ThirdPersonMeshComponent->SetCastShadow(false);
 
 	FirstPersonMeshComponent->SetStaticMesh(Mesh);
 	ThirdPersonMeshComponent->SetStaticMesh(Mesh);
@@ -91,45 +92,55 @@ FHitResult UPPortalGunComponent::LineTrace() const
 	return HitResult;
 }
 
+void UPPortalGunComponent::AuthSpawnOrUpdatePortal(const FHitResult& HitResult, const int32 PortalID)
+{
+	if (!GetOwner()->HasAuthority()) return;
+
+	AActor* Surface = HitResult.GetActor();
+	if (!IsValid(Surface)) return;
+
+	const FTransform SurfaceWorldOrigin(HitResult.ImpactNormal.Rotation(), FVector::ZeroVector);
+	const FVector RelativeToSurface = SurfaceWorldOrigin.InverseTransformPosition(HitResult.Location);
+	const FVector GriSnapped(
+		RelativeToSurface.X,
+		FMath::GridSnap(RelativeToSurface.Y, 100.f),
+		FMath::GridSnap(RelativeToSurface.Z, 100.f)
+	);
+	const FVector PortalLocation = SurfaceWorldOrigin.TransformPosition(GriSnapped) + (HitResult.ImpactNormal *
+		1.f);
+	const FRotator PortalRotation = HitResult.ImpactNormal.Rotation();
+	const FTransform PortalTransform(PortalRotation, PortalLocation);
+
+	APPortal* Portal = Portals[PortalID];
+
+	if (!IsValid(Portal))
+	{
+		APPortal* LinkedPortal = Portals[PortalID == 0 ? 1 : 0];
+
+		Portal = GetWorld()->SpawnActorDeferred<APPortal>(PortalClass, PortalTransform, GetOwner(), GetOwner<APawn>());
+		Portal->MultiInitialize(EmptyPortalMaterial);
+		Portal->AuthSetLinkedPortal(LinkedPortal);
+		Portal->AuthSetSurface(Surface);
+
+		if (IsValid(LinkedPortal)) LinkedPortal->AuthSetLinkedPortal(Portal);
+
+		Portal->FinishSpawning(PortalTransform);
+		Portals[PortalID] = Portal;
+	}
+	else
+	{
+		Portal->AuthSetSurface(Surface);
+		Portal->SetActorTransform(PortalTransform);
+	}
+}
+
 
 void UPPortalGunComponent::ServerFire_Implementation(const FHitResult& HitResult, const int32 PortalID)
 {
 	check(IsValid(PortalClass));
 	check(IsValid(EmptyPortalMaterial));
 
-	AActor* HitActor = HitResult.GetActor();
-
-	if (IsValid(HitActor))
-	{
-		APPortal* Portal = Portals[PortalID];
-
-		if (!IsValid(Portal))
-		{
-			APPortal* LinkedPortal = Portals[PortalID == 0 ? 1 : 0];
-
-			Portal = GetWorld()->SpawnActor<APPortal>(PortalClass);
-			Portal->AuthSetEmptyMaterial(EmptyPortalMaterial);
-			Portal->AuthSetLinkedPortal(LinkedPortal);
-
-			Portals[PortalID] = Portal;
-
-			if (IsValid(LinkedPortal)) LinkedPortal->AuthSetLinkedPortal(Portal);
-		}
-
-		FTransform WorldGridTransform(HitResult.ImpactNormal.Rotation(), FVector::ZeroVector);
-		FVector RelativeToWorldOrigin = WorldGridTransform.InverseTransformPosition(HitResult.Location);
-		FVector SnappedLocal(
-			RelativeToWorldOrigin.X,
-			FMath::GridSnap(RelativeToWorldOrigin.Y, 100.f),
-			FMath::GridSnap(RelativeToWorldOrigin.Z, 100.f)
-		);
-		FVector FinalWorldLocation = WorldGridTransform.TransformPosition(SnappedLocal);
-		Portal->SetActorLocation(FinalWorldLocation + (HitResult.ImpactNormal * 0.1f));
-
-		Portal->SetActorRotation(HitResult.ImpactNormal.Rotation());
-		Portal->AuthSetSurface(HitActor);
-	}
-
+	AuthSpawnOrUpdatePortal(HitResult, PortalID);
 	MultiFire();
 }
 

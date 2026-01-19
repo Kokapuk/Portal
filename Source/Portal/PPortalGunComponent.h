@@ -37,6 +37,9 @@ protected:
 	UFUNCTION(Server, Unreliable)
 	void ServerFire(const FHitResult& HitResult, const int32 PortalID);
 	
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly)
+	void AuthSpawnOrUpdatePortal(const FHitResult& HitResult, const int32 PortalID);
+	
 	UFUNCTION(NetMulticast, Unreliable)
 	void MultiFire();
 	

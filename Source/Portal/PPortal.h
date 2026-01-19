@@ -26,8 +26,10 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void Tick(float DeltaTime) override;
 
+	UFUNCTION(NetMulticast, Reliable)
+	void MultiInitialize(UMaterial* DefaultEmptyMaterial);
+
 	void AuthSetLinkedPortal(APPortal* NewLinkedPortal);
-	void AuthSetEmptyMaterial(UMaterial* NewEmptyMaterial);
 	void AuthSetSurface(AActor* NewSurface);
 
 	UFUNCTION(BlueprintPure)
@@ -65,14 +67,14 @@ protected:
 	UPROPERTY(ReplicatedUsing=OnRep_LinkedPortal)
 	APPortal* LinkedPortal;
 
-	UPROPERTY(ReplicatedUsing=OnRep_EmptyMaterial)
+	UPROPERTY()
 	UMaterial* EmptyMaterial;
 
 	virtual void BeginPlay() override;
 
 	void SetupDynamicTarget();
 	void UpdateMaterial() const;
-	void CheckPortalTransition();
+	void CheckTransition();
 
 private:
 	UPROPERTY()
@@ -91,7 +93,4 @@ private:
 
 	UFUNCTION()
 	void OnRep_LinkedPortal();
-
-	UFUNCTION()
-	void OnRep_EmptyMaterial() { UpdateMaterial(); }
 };

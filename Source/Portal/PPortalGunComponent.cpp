@@ -43,7 +43,6 @@ void UPPortalGunComponent::BeginPlay()
 	FirstPersonMeshComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
 	ThirdPersonMeshComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
 
-	FirstPersonMeshComponent->SetOnlyOwnerSee(true);
 	ThirdPersonMeshComponent->SetOwnerNoSee(true);
 
 	FirstPersonMeshComponent->AttachToComponent(
@@ -52,6 +51,8 @@ void UPPortalGunComponent::BeginPlay()
 	ThirdPersonMeshComponent->AttachToComponent(ThirdPersonMesh,
 	                                            FAttachmentTransformRules(EAttachmentRule::SnapToTarget, true),
 	                                            "GripPoint");
+	
+	OwnerCharacter->UpdateFirstPersonCapture({FirstPersonMeshComponent});
 }
 
 void UPPortalGunComponent::CosmeticFire(const int32 PortalID)
@@ -129,8 +130,8 @@ void UPPortalGunComponent::AuthSpawnOrUpdatePortal(const FHitResult& HitResult, 
 	}
 	else
 	{
-		Portal->AuthSetSurface(Surface);
 		Portal->SetActorTransform(PortalTransform);
+		Portal->AuthSetSurface(Surface);
 	}
 }
 

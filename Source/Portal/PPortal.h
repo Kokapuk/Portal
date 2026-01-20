@@ -22,7 +22,7 @@ class PORTAL_API APPortal : public AActor
 
 public:
 	APPortal();
-
+	
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void Tick(float DeltaTime) override;
 
@@ -32,10 +32,7 @@ public:
 	void AuthSetLinkedPortal(APPortal* NewLinkedPortal);
 	void AuthSetSurface(AActor* NewSurface);
 
-	UFUNCTION(BlueprintPure)
 	USceneCaptureComponent2D* GetSceneCaptureComponent() const { return SceneCaptureComponent; }
-
-	UFUNCTION(BlueprintPure)
 	UArrowComponent* GetEntrance() const { return Entrance; }
 
 	UFUNCTION(BlueprintPure)
@@ -45,21 +42,9 @@ public:
 
 protected:
 	FPostUpdateWorkTickFunction PostPostUpdateWorkTick;
-
+	
 	UPROPERTY(EditDefaultsOnly, meta=(ClampMin=0.f, ClampMax=1.f))
 	float TeleportationThreshold;
-
-	UPROPERTY(EditDefaultsOnly)
-	UStaticMeshComponent* Mesh;
-
-	UPROPERTY(EditDefaultsOnly)
-	USceneCaptureComponent2D* SceneCaptureComponent;
-
-	UPROPERTY(EditDefaultsOnly)
-	UArrowComponent* Entrance;
-
-	UPROPERTY(EditDefaultsOnly)
-	UBoxComponent* Trigger;
 
 	UPROPERTY(ReplicatedUsing=OnRep_Surface)
 	AActor* Surface;
@@ -70,9 +55,33 @@ protected:
 	UPROPERTY()
 	UMaterial* EmptyMaterial;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	UStaticMeshComponent* Mesh;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	USceneCaptureComponent2D* SceneCaptureComponent;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	UArrowComponent* Entrance;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	UBoxComponent* Trigger;
+	
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	UBoxComponent* FrameTop;
+	
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	UBoxComponent* FrameRight;
+	
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	UBoxComponent* FrameBottom;
+	
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	UBoxComponent* FrameLeft;
+
 	virtual void BeginPlay() override;
 
-	void SetupDynamicTarget();
+	void InitializeDynamicTarget();
 	void UpdateMaterial() const;
 	void CheckTransition();
 

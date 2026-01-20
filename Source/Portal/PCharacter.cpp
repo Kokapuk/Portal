@@ -10,6 +10,9 @@
 #include "InputMappingContext.h"
 #include "PInputActions.h"
 #include "PPortalGunComponent.h"
+#include "Components/SceneCaptureComponent2D.h"
+#include "Engine/TextureRenderTarget2D.h"
+#include "Kismet/KismetRenderingLibrary.h"
 
 APCharacter::APCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UPCharacterMovementComponent>(CharacterMovementComponentName))
@@ -19,12 +22,13 @@ APCharacter::APCharacter(const FObjectInitializer& ObjectInitializer)
 	TargetCameraHeight = BaseEyeHeight;
 
 	UCapsuleComponent* Capsule = GetCapsuleComponent();
-	Capsule->SetCapsuleHalfHeight(96.f);
-	Capsule->SetCapsuleRadius(40.f);
+	Capsule->SetCapsuleHalfHeight(80.f);
+	Capsule->SetCapsuleRadius(30.f);
 
 	USkeletalMeshComponent* CharacterMesh = GetMesh();
-	CharacterMesh->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+	CharacterMesh->SetRelativeRotation(FRotator(0.f, -Capsule->GetScaledCapsuleHalfHeight(), 0.f));
 	CharacterMesh->SetRelativeLocation(FVector(0.f, 0.f, -Capsule->GetScaledCapsuleHalfHeight()));
+	CharacterMesh->SetRelativeScale3D(FVector::OneVector * 0.9f);
 	CharacterMesh->SetOwnerNoSee(true);
 	CharacterMesh->SetGenerateOverlapEvents(false);
 	CharacterMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
@@ -32,16 +36,18 @@ APCharacter::APCharacter(const FObjectInitializer& ObjectInitializer)
 	Camera = CreateDefaultSubobject<UCameraComponent>("Camera");
 	Camera->SetupAttachment(CharacterMesh);
 	Camera->SetRelativeRotation(FRotator(0.f, 90.f, 0.f));
-	Camera->SetRelativeScale3D(FVector(.5f));
 	Camera->SetFieldOfView(103.f);
 	Camera->bUsePawnControlRotation = true;
 
 	ArmsMesh = CreateDefaultSubobject<USkeletalMeshComponent>("ArmsMesh");
-	ArmsMesh->SetOnlyOwnerSee(true);
 	ArmsMesh->SetRelativeLocation(FVector(0.f, 10.f, -160.f));
 	ArmsMesh->SetupAttachment(Camera);
-	ArmsMesh->bCastDynamicShadow = false;
-	ArmsMesh->CastShadow = false;
+
+	FirstPersonCapture = CreateDefaultSubobject<USceneCaptureComponent2D>("FirstPersonCapture");
+	FirstPersonCapture->SetupAttachment(Camera);
+	FirstPersonCapture->FOVAngle = Camera->FieldOfView;
+	FirstPersonCapture->bCaptureOnMovement = false;
+	FirstPersonCapture->bCaptureEveryFrame = false;
 
 	PortalGunComponent = CreateDefaultSubobject<UPPortalGunComponent>("PortalGunComponent");
 }
@@ -51,6 +57,19 @@ void APCharacter::OnConstruction(const FTransform& Transform)
 	Super::OnConstruction(Transform);
 
 	Camera->SetRelativeLocation(FVector(0.f, 0.f, BaseEyeHeight));
+}
+
+void APCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+	GEngine->GameViewport->Viewport->ViewportResizedEvent.AddUObject(this, &APCharacter::OnViewportResize);
+}
+
+void APCharacter::Restart()
+{
+	Super::Restart();
+	UpdateFirstPersonCapture({});
 }
 
 void APCharacter::Tick(float DeltaSeconds)
@@ -112,6 +131,40 @@ void APCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponen
 bool APCharacter::CanJumpInternal_Implementation() const
 {
 	return JumpIsAllowedInternal();
+}
+
+void APCharacter::InitializeFirstPersonRenderTarget()
+{
+	check(IsValid(FirstPersonCaptureMaterial))
+
+	FVector2D ViewportSize;
+	GEngine->GameViewport->GetViewportSize(ViewportSize);
+
+	FirstPersonRenderTarget = UKismetRenderingLibrary::CreateRenderTarget2D(
+		this, ViewportSize.X, ViewportSize.Y, RTF_RGBA16f);
+
+	FirstPersonCapture->TextureTarget = FirstPersonRenderTarget;
+
+	DynamicFirstPersonCaptureMaterial = UMaterialInstanceDynamic::Create(FirstPersonCaptureMaterial, this);
+	DynamicFirstPersonCaptureMaterial->SetTextureParameterValue("Texture", FirstPersonRenderTarget);
+}
+
+void APCharacter::UpdateFirstPersonCapture(const TArray<UPrimitiveComponent*>& AdditionalComponentsToCapture)
+{
+	const bool LocallyControlled = IsLocallyControlled();
+	FirstPersonCapture->bCaptureEveryFrame = LocallyControlled;
+
+	TArray<UPrimitiveComponent*> ComponentsToCapture;
+	ComponentsToCapture.Add(ArmsMesh);
+	ComponentsToCapture.Append(AdditionalComponentsToCapture);
+
+	FirstPersonCapture->ClearShowOnlyComponents();
+	for (UPrimitiveComponent* Component : ComponentsToCapture)
+	{
+		Component->SetVisibility(LocallyControlled);
+		Component->SetVisibleInSceneCaptureOnly(true);
+		if (LocallyControlled) FirstPersonCapture->ShowOnlyComponent(Component);
+	}
 }
 
 void APCharacter::Look(const FInputActionValue& Value)

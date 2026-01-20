@@ -2,22 +2,27 @@
 
 #include "Components/ArrowComponent.h"
 #include "Components/BoxComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PawnMovementComponent.h"
+#include "Kismet/KismetRenderingLibrary.h"
 #include "Net/UnrealNetwork.h"
 
 APPortal::APPortal()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.TickGroup = TG_PostPhysics;
 
 	PostPostUpdateWorkTick.bCanEverTick = true;
 	PostPostUpdateWorkTick.TickGroup = TG_PostUpdateWork;
 	PostPostUpdateWorkTick.Target = this;
 
-	SetReplicates(true);
+	bReplicates = true;
 	SetReplicateMovement(true);
-
+	
 	TeleportationThreshold = 0.002f; // NearClipPlane + 0.001 as safe buffer zone
 
 	RootComponent = Mesh = CreateDefaultSubobject<UStaticMeshComponent>("Mesh");
@@ -39,6 +44,19 @@ APPortal::APPortal()
 	Trigger = CreateDefaultSubobject<UBoxComponent>("Trigger");
 	Trigger->SetupAttachment(RootComponent);
 	Trigger->SetCollisionResponseToAllChannels(ECR_Ignore);
+	Trigger->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+
+	FrameTop = CreateDefaultSubobject<UBoxComponent>("FrameTop");
+	FrameRight = CreateDefaultSubobject<UBoxComponent>("FrameRight");
+	FrameBottom = CreateDefaultSubobject<UBoxComponent>("FrameBottom");
+	FrameLeft = CreateDefaultSubobject<UBoxComponent>("FrameLeft");
+
+	for (TArray Frames = {FrameTop, FrameRight, FrameBottom, FrameLeft}; UBoxComponent* Frame : Frames)
+	{
+		Frame->SetupAttachment(RootComponent);
+		Frame->SetCollisionProfileName("BlockAllDynamic");
+		Frame->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
+	}
 }
 
 void APPortal::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -48,7 +66,6 @@ void APPortal::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetime
 	DOREPLIFETIME(APPortal, Surface);
 	DOREPLIFETIME(APPortal, LinkedPortal);
 }
-
 
 void APPortal::BeginPlay()
 {
@@ -63,17 +80,14 @@ void APPortal::BeginPlay()
 	Trigger->OnComponentEndOverlap.AddDynamic(this, &APPortal::OnTriggerEndOverlap);
 }
 
-void APPortal::SetupDynamicTarget()
+void APPortal::InitializeDynamicTarget()
 {
 	if (GetWorld()->GetNetMode() == NM_DedicatedServer) return;
 
-	RenderTarget = NewObject<UTextureRenderTarget2D>(this);
-
 	FVector2D ViewportSize;
 	GEngine->GameViewport->GetViewportSize(ViewportSize);
-
-	RenderTarget->InitCustomFormat(ViewportSize.X, ViewportSize.Y, PF_FloatRGBA, true);
-	RenderTarget->ClearColor = FLinearColor::Black;
+	RenderTarget = UKismetRenderingLibrary::CreateRenderTarget2D(
+		this, ViewportSize.X, ViewportSize.Y, RTF_RGBA16f);
 }
 
 void APPortal::UpdateMaterial() const
@@ -84,10 +98,10 @@ void APPortal::UpdateMaterial() const
 
 	if (IsValid(LinkedPortal))
 	{
-		UMaterialInstanceDynamic* DynMaterial = Mesh->CreateDynamicMaterialInstance(0);
+		UMaterialInstanceDynamic* DynamicMaterial = Mesh->CreateDynamicMaterialInstance(0);
 
-		DynMaterial->SetTextureParameterValue("PortalTexture", RenderTarget);
-		Mesh->SetMaterial(0, DynMaterial);
+		DynamicMaterial->SetTextureParameterValue("PortalTexture", RenderTarget);
+		Mesh->SetMaterial(0, DynamicMaterial);
 	}
 	else Mesh->SetMaterial(0, EmptyMaterial);
 }
@@ -128,35 +142,37 @@ void APPortal::CheckTransition()
 
 	for (AActor* Actor : ActorsInTrigger)
 	{
-		APawn* Pawn = Cast<APawn>(Actor);
+		ACharacter* Character = Cast<ACharacter>(Actor);
 
-		if (!HasAuthority() && !Pawn->IsLocallyControlled()) continue;
+		if (!HasAuthority() && !Character->IsLocallyControlled()) continue;
 
-		FVector RelativePosition = GetTransform().InverseTransformPosition(Pawn->GetActorLocation());
+		FVector RelativePosition = GetTransform().InverseTransformPosition(Character->GetActorLocation());
+		FVector RelativeVelocity = Entrance->GetComponentTransform().InverseTransformVector(
+			Character->GetVelocity());
+		FVector PotentialPositionNextFrame = RelativePosition + -RelativeVelocity * GetWorld()->GetDeltaSeconds();
 
-		if (RelativePosition.X < TeleportationThreshold)
+		if (PotentialPositionNextFrame.X <= TeleportationThreshold)
 		{
-			FVector NewLocation(TeleportationThreshold + 0.001f, -RelativePosition.Y, RelativePosition.Z);
-			// + 0.001 to eliminate poor floating point precision issues on check
+			FVector NewLocation(0.1f, -RelativePosition.Y, RelativePosition.Z);
 			NewLocation = LinkedPortal->GetTransform().TransformPosition(NewLocation);
 
-			FRotator RelativeRotation = Entrance->GetComponentTransform().InverseTransformRotation(
-				Pawn->GetActorRotation().Quaternion()).Rotator();
-			FRotator CurrentRotation = GetWorld()->GetFirstPlayerController()->GetControlRotation();
-			FRotator NewRotation = FRotator(CurrentRotation.Pitch,
-			                                LinkedPortal->GetActorRotation().Yaw + RelativeRotation.Yaw,
-			                                CurrentRotation.Roll);
+			FQuat RelativeControlRotation = Entrance->GetComponentTransform().InverseTransformRotation(
+				Character->GetControlRotation().Quaternion());
+			FRotator NewControlRotation = LinkedPortal->GetTransform().TransformRotation(RelativeControlRotation).
+			                                            Rotator();
+			NewControlRotation.Roll = 0.f;
 
-			FVector RelativeVelocity = Entrance->GetComponentTransform().InverseTransformVector(Pawn->GetVelocity());
 			FVector NewVelocity = LinkedPortal->GetTransform().TransformVector(RelativeVelocity);
 
-			if (Pawn->IsLocallyControlled())
+			if (Character->IsLocallyControlled())
 			{
-				Pawn->GetController()->SetControlRotation(NewRotation);
+				Character->GetController()->SetControlRotation(NewControlRotation);
 			}
 
-			Pawn->SetActorLocation(NewLocation);
-			Pawn->GetMovementComponent()->Velocity = NewVelocity;
+			Character->GetMovementComponent()->Velocity = FVector::ZeroVector;
+			Character->SetActorLocation(NewLocation);
+			Character->GetMovementComponent()->Velocity = NewVelocity;
+			Character->GetCharacterMovement()->UpdateComponentVelocity();
 		}
 	}
 }
@@ -166,14 +182,22 @@ void APPortal::OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor
                                      const FHitResult& SweepResult)
 {
 	check(IsValid(Surface));
-	Surface->SetActorEnableCollision(false);
+
+	if (ACharacter* Character = Cast<ACharacter>(OtherActor))
+	{
+		Character->GetCapsuleComponent()->IgnoreActorWhenMoving(Surface, true);
+	}
 }
 
 void APPortal::OnTriggerEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
                                    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
 	check(IsValid(Surface));
-	Surface->SetActorEnableCollision(true);
+
+	if (ACharacter* Character = Cast<ACharacter>(OtherActor))
+	{
+		Character->GetCapsuleComponent()->IgnoreActorWhenMoving(Surface, false);
+	}
 }
 
 void APPortal::OnRep_Surface()
@@ -203,7 +227,7 @@ void APPortal::Tick(float DeltaTime)
 
 void APPortal::MultiInitialize_Implementation(UMaterial* DefaultEmptyMaterial)
 {
-	SetupDynamicTarget();
+	InitializeDynamicTarget();
 	EmptyMaterial = DefaultEmptyMaterial;
 	UpdateMaterial();
 }

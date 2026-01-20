@@ -14,8 +14,6 @@ class UCameraComponent;
 class UAnimMontage;
 class UInputMappingContext;
 
-DECLARE_DELEGATE_OneParam(FCrouchDelegate, bool);
-
 UCLASS()
 class APCharacter : public ACharacter
 {
@@ -25,20 +23,37 @@ public:
 	explicit APCharacter(const FObjectInitializer& ObjectInitializer);
 
 	virtual void OnConstruction(const FTransform& Transform) override;
+	virtual void BeginPlay() override;
+	virtual void Restart() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
 	virtual void OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
 
-	UFUNCTION(BlueprintPure)
+	void UpdateFirstPersonCapture(const TArray<UPrimitiveComponent*>& AdditionalComponentsToCapture);
+
+	UFUNCTION(BlueprintCallable)
+	void InitializeFirstPersonRenderTarget();
+
 	UCameraComponent* GetCamera() const { return Camera; }
-
-	UFUNCTION(BlueprintPure)
 	USkeletalMeshComponent* GetArmsMesh() const { return ArmsMesh; }
-
-	UFUNCTION(BlueprintPure)
 	UPPortalGunComponent* GetPortalGunComponent() const { return PortalGunComponent; }
 
+	UFUNCTION(BlueprintCallable)
+	UMaterialInstanceDynamic* GetDynamicFirstPersonCaptureMaterial() const { return DynamicFirstPersonCaptureMaterial; }
+
 protected:
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	UCameraComponent* Camera;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	USkeletalMeshComponent* ArmsMesh;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	UPPortalGunComponent* PortalGunComponent;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	USceneCaptureComponent2D* FirstPersonCapture;
+
 	UPROPERTY(EditDefaultsOnly)
 	UInputMappingContext* InputMapping;
 
@@ -46,13 +61,7 @@ protected:
 	UPInputActions* InputActions;
 
 	UPROPERTY(EditDefaultsOnly)
-	UCameraComponent* Camera;
-
-	UPROPERTY(EditDefaultsOnly)
-	USkeletalMeshComponent* ArmsMesh;
-
-	UPROPERTY(EditDefaultsOnly)
-	UPPortalGunComponent* PortalGunComponent;
+	UMaterial* FirstPersonCaptureMaterial;
 
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 	virtual bool CanJumpInternal_Implementation() const override;
@@ -63,4 +72,12 @@ protected:
 
 private:
 	float TargetCameraHeight;
+
+	UPROPERTY()
+	UTextureRenderTarget2D* FirstPersonRenderTarget;
+
+	UPROPERTY()
+	UMaterialInstanceDynamic* DynamicFirstPersonCaptureMaterial;
+
+	void OnViewportResize(FViewport* ViewPort, uint32 Value) { InitializeFirstPersonRenderTarget(); }
 };

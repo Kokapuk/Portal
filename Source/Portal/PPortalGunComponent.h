@@ -1,10 +1,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
+
 #include "Components/ActorComponent.h"
+
 #include "PPortalGunComponent.generated.h"
 
 class APPortal;
+class USoundCue;
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent), DisplayName="Portal Gun Component", Blueprintable)
 class PORTAL_API UPPortalGunComponent : public UActorComponent
@@ -17,7 +20,7 @@ public:
 	virtual void BeginPlay() override;
 
 	UFUNCTION(BlueprintCallable, BlueprintCosmetic, DisplayName="Fire")
-	void CosmeticFire(const int32 PortalID);
+	void CosmeticFire(int32 PortalID);
 
 protected:
 	UPROPERTY(EditDefaultsOnly)
@@ -27,21 +30,26 @@ protected:
 	UAnimMontage* FirstPersonFireMontage;
 	
 	UPROPERTY(EditDefaultsOnly)
+	TArray<USoundCue*> ShotSounds; 
+	
+	UPROPERTY(EditDefaultsOnly)
 	TSubclassOf<APPortal> PortalClass;
 	
 	UPROPERTY(EditDefaultsOnly)
-	UMaterial* EmptyPortalMaterial;
+	TArray<FLinearColor> Colors;
 
 	FHitResult LineTrace() const;
 
 	UFUNCTION(Server, Unreliable)
-	void ServerFire(const FHitResult& HitResult, const int32 PortalID);
+	void ServerFire(const FHitResult& HitResult, int32 PortalID);
 	
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly)
-	void AuthSpawnOrUpdatePortal(const FHitResult& HitResult, const int32 PortalID);
+	void AuthSpawnOrUpdatePortal(const FHitResult& HitResult, int32 PortalID);
 	
 	UFUNCTION(NetMulticast, Unreliable)
-	void MultiFire();
+	void MultiFire(int32 PortalID);
+
+	void PlayShotEffects(int32 PortalID);
 	
 private:
 	UPROPERTY()

@@ -2,14 +2,21 @@
 
 #include "PCharacter.h"
 #include "PPortal.h"
+
 #include "Camera/CameraComponent.h"
+
+#include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetSystemLibrary.h"
+
+#include "Sound/SoundCue.h"
 
 UPPortalGunComponent::UPPortalGunComponent()
 {
 	SetIsReplicatedByDefault(true);
 	SetIsReplicated(true);
+
+	Colors = {FLinearColor::Red, FLinearColor::Blue};
 }
 
 void UPPortalGunComponent::BeginPlay()
@@ -43,6 +50,8 @@ void UPPortalGunComponent::BeginPlay()
 	FirstPersonMeshComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
 	ThirdPersonMeshComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
 
+	FirstPersonMeshComponent->SetCastShadow(false);
+
 	ThirdPersonMeshComponent->SetOwnerNoSee(true);
 
 	FirstPersonMeshComponent->AttachToComponent(
@@ -51,11 +60,11 @@ void UPPortalGunComponent::BeginPlay()
 	ThirdPersonMeshComponent->AttachToComponent(ThirdPersonMesh,
 	                                            FAttachmentTransformRules(EAttachmentRule::SnapToTarget, true),
 	                                            "GripPoint");
-	
+
 	OwnerCharacter->UpdateFirstPersonCapture({FirstPersonMeshComponent});
 }
 
-void UPPortalGunComponent::CosmeticFire(const int32 PortalID)
+void UPPortalGunComponent::CosmeticFire(int32 PortalID)
 {
 	check(IsValid(FirstPersonFireMontage))
 
@@ -69,6 +78,8 @@ void UPPortalGunComponent::CosmeticFire(const int32 PortalID)
 
 	const FHitResult HitResult = LineTrace();
 	ServerFire(HitResult, PortalID);
+
+	PlayShotEffects(PortalID);
 }
 
 FHitResult UPPortalGunComponent::LineTrace() const
@@ -93,7 +104,7 @@ FHitResult UPPortalGunComponent::LineTrace() const
 	return HitResult;
 }
 
-void UPPortalGunComponent::AuthSpawnOrUpdatePortal(const FHitResult& HitResult, const int32 PortalID)
+void UPPortalGunComponent::AuthSpawnOrUpdatePortal(const FHitResult& HitResult, int32 PortalID)
 {
 	if (!GetOwner()->HasAuthority()) return;
 
@@ -108,9 +119,18 @@ void UPPortalGunComponent::AuthSpawnOrUpdatePortal(const FHitResult& HitResult, 
 		FMath::GridSnap(RelativeToSurface.Z, 100.f)
 	);
 	const FVector PortalLocation = SurfaceWorldOrigin.TransformPosition(GriSnapped) + (HitResult.ImpactNormal *
-		1.f);
-	const FRotator PortalRotation = HitResult.ImpactNormal.Rotation();
+		0.1f);
+	// const FVector PortalLocation = (HitResult.ImpactPoint) + (HitResult.ImpactNormal * 0.1f);
+
+	FRotator PortalRotation = HitResult.ImpactNormal.Rotation();
+
+	if (FMath::Abs(HitResult.ImpactNormal.Z) == 1.f)
+	{
+		PortalRotation.Yaw = (HitResult.TraceStart - HitResult.ImpactPoint).Rotation().Yaw;
+	}
+
 	const FTransform PortalTransform(PortalRotation, PortalLocation);
+
 
 	APPortal* Portal = Portals[PortalID];
 
@@ -119,7 +139,7 @@ void UPPortalGunComponent::AuthSpawnOrUpdatePortal(const FHitResult& HitResult, 
 		APPortal* LinkedPortal = Portals[PortalID == 0 ? 1 : 0];
 
 		Portal = GetWorld()->SpawnActorDeferred<APPortal>(PortalClass, PortalTransform, GetOwner(), GetOwner<APawn>());
-		Portal->MultiInitialize(EmptyPortalMaterial);
+		Portal->MultiInitialize(Colors[PortalID]);
 		Portal->AuthSetLinkedPortal(LinkedPortal);
 		Portal->AuthSetSurface(Surface);
 
@@ -135,16 +155,30 @@ void UPPortalGunComponent::AuthSpawnOrUpdatePortal(const FHitResult& HitResult, 
 	}
 }
 
-
-void UPPortalGunComponent::ServerFire_Implementation(const FHitResult& HitResult, const int32 PortalID)
+void UPPortalGunComponent::PlayShotEffects(int32 PortalID)
 {
-	check(IsValid(PortalClass));
-	check(IsValid(EmptyPortalMaterial));
+	check(ShotSounds.Num() == 2)
 
-	AuthSpawnOrUpdatePortal(HitResult, PortalID);
-	MultiFire();
+	USoundCue* ShotSound = ShotSounds[PortalID];
+
+	UGameplayStatics::PlaySoundAtLocation(this, ShotSound, GetOwner()->GetActorLocation());
+	UGameplayStatics::SpawnSoundAttached(ShotSound, GetOwner()->GetRootComponent());
 }
 
-void UPPortalGunComponent::MultiFire_Implementation()
+
+void UPPortalGunComponent::ServerFire_Implementation(const FHitResult& HitResult, int32 PortalID)
 {
+	check(IsValid(PortalClass));
+	check(Colors.Num() == 2)
+
+	AuthSpawnOrUpdatePortal(HitResult, PortalID);
+	MultiFire(PortalID);
+}
+
+void UPPortalGunComponent::MultiFire_Implementation(int32 PortalID)
+{
+	if (GetOwner()->GetLocalRole() == ROLE_AutonomousProxy)
+	{
+		PlayShotEffects(PortalID);
+	}
 }

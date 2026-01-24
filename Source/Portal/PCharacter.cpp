@@ -42,6 +42,7 @@ APCharacter::APCharacter(const FObjectInitializer& ObjectInitializer)
 	ArmsMesh = CreateDefaultSubobject<USkeletalMeshComponent>("ArmsMesh");
 	ArmsMesh->SetRelativeLocation(FVector(0.f, 10.f, -160.f));
 	ArmsMesh->SetupAttachment(Camera);
+	ArmsMesh->SetCastShadow(false);
 
 	FirstPersonCapture = CreateDefaultSubobject<USceneCaptureComponent2D>("FirstPersonCapture");
 	FirstPersonCapture->SetupAttachment(Camera);
@@ -187,6 +188,6 @@ void APCharacter::Fire(const FInputActionValue& Value)
 {
 	const float AxisValue = Value.Get<float>();
 
-	if (AxisValue > 0) PortalGunComponent->CosmeticFire(0);
+	if (AxisValue < 0) PortalGunComponent->CosmeticFire(0);
 	else PortalGunComponent->CosmeticFire(1);
 }

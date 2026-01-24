@@ -4,11 +4,15 @@
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
+
 #include "Engine/TextureRenderTarget2D.h"
+
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PawnMovementComponent.h"
+
 #include "Kismet/KismetRenderingLibrary.h"
+
 #include "Net/UnrealNetwork.h"
 
 APPortal::APPortal()
@@ -16,17 +20,26 @@ APPortal::APPortal()
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.TickGroup = TG_PostPhysics;
 
-	PostPostUpdateWorkTick.bCanEverTick = true;
-	PostPostUpdateWorkTick.TickGroup = TG_PostUpdateWork;
-	PostPostUpdateWorkTick.Target = this;
+	PostUpdateWorkTick.bCanEverTick = true;
+	PostUpdateWorkTick.TickGroup = TG_PostUpdateWork;
+	PostUpdateWorkTick.Target = this;
 
 	bReplicates = true;
 	SetReplicateMovement(true);
-	
+
+	Height = 215.f;
+	Width = 115.f;
+	FrameThickness = 40.f;
+	FrameLength = 60.f;
+	TriggerLength = 60.f;
 	TeleportationThreshold = 0.002f; // NearClipPlane + 0.001 as safe buffer zone
 
-	RootComponent = Mesh = CreateDefaultSubobject<UStaticMeshComponent>("Mesh");
+	RootComponent = CreateDefaultSubobject<USceneComponent>("Root");
+
+	Mesh = CreateDefaultSubobject<UStaticMeshComponent>("Mesh");
+	Mesh->SetupAttachment(RootComponent);
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Mesh->SetCastShadow(false);
 
 	SceneCaptureComponent = CreateDefaultSubobject<USceneCaptureComponent2D>("USceneCaptureComponent");
 	SceneCaptureComponent->SetupAttachment(RootComponent);
@@ -44,7 +57,7 @@ APPortal::APPortal()
 	Trigger = CreateDefaultSubobject<UBoxComponent>("Trigger");
 	Trigger->SetupAttachment(RootComponent);
 	Trigger->SetCollisionResponseToAllChannels(ECR_Ignore);
-	Trigger->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+	Trigger->ShapeColor = FColor::Green;
 
 	FrameTop = CreateDefaultSubobject<UBoxComponent>("FrameTop");
 	FrameRight = CreateDefaultSubobject<UBoxComponent>("FrameRight");
@@ -56,6 +69,7 @@ APPortal::APPortal()
 		Frame->SetupAttachment(RootComponent);
 		Frame->SetCollisionProfileName("BlockAllDynamic");
 		Frame->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
+		Frame->ShapeColor = FColor::Red;
 	}
 }
 
@@ -67,20 +81,49 @@ void APPortal::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetime
 	DOREPLIFETIME(APPortal, LinkedPortal);
 }
 
+void APPortal::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+
+	const float HalfHeight = Height / 2.f;
+	const float HalfWidth = Width / 2.f;
+	const float HalfFrameLength = FrameLength / 2.f;
+	const float HalfFrameThickness = FrameThickness / 2.f;
+	const float HalfTriggerLength = TriggerLength / 2.f;
+
+	Mesh->SetRelativeScale3D(FVector(1.f, Width / BaseMeshSize, Height / BaseMeshSize));
+	Mesh->SetRelativeLocation(FVector::ZeroVector);
+
+	FrameTop->SetBoxExtent(FVector(HalfFrameLength, HalfWidth, HalfFrameThickness));
+	FrameTop->SetRelativeLocation(FVector(-HalfFrameLength, 0.f, HalfHeight + HalfFrameThickness));
+
+	FrameRight->SetBoxExtent(FVector(HalfFrameLength, HalfFrameThickness, HalfHeight));
+	FrameRight->SetRelativeLocation(FVector(-HalfFrameLength, -(HalfWidth + HalfFrameThickness), 0.f));
+
+	FrameBottom->SetBoxExtent(FVector(HalfFrameLength, HalfWidth, HalfFrameThickness));
+	FrameBottom->SetRelativeLocation(FVector(-HalfFrameLength, 0.f, -(HalfHeight + HalfFrameThickness)));
+
+	FrameLeft->SetBoxExtent(FVector(HalfFrameLength, HalfFrameThickness, HalfHeight));
+	FrameLeft->SetRelativeLocation(FVector(-HalfFrameLength, HalfWidth + HalfFrameThickness, 0.f));
+
+	Trigger->SetBoxExtent(FVector(HalfTriggerLength, HalfWidth, HalfHeight));
+	Trigger->SetRelativeLocation(FVector::ZeroVector);
+}
+
 void APPortal::BeginPlay()
 {
 	Super::BeginPlay();
 
 	if (!HasAnyFlags(RF_ClassDefaultObject))
 	{
-		PostPostUpdateWorkTick.RegisterTickFunction(GetLevel());
+		PostUpdateWorkTick.RegisterTickFunction(GetLevel());
 	}
 
 	Trigger->OnComponentBeginOverlap.AddDynamic(this, &APPortal::OnTriggerBeginOverlap);
 	Trigger->OnComponentEndOverlap.AddDynamic(this, &APPortal::OnTriggerEndOverlap);
 }
 
-void APPortal::InitializeDynamicTarget()
+void APPortal::InitializeRenderTarget()
 {
 	if (GetWorld()->GetNetMode() == NM_DedicatedServer) return;
 
@@ -88,6 +131,7 @@ void APPortal::InitializeDynamicTarget()
 	GEngine->GameViewport->GetViewportSize(ViewportSize);
 	RenderTarget = UKismetRenderingLibrary::CreateRenderTarget2D(
 		this, ViewportSize.X, ViewportSize.Y, RTF_RGBA16f);
+	SceneCaptureComponent->TextureTarget = RenderTarget;
 }
 
 void APPortal::UpdateMaterial() const
@@ -96,14 +140,24 @@ void APPortal::UpdateMaterial() const
 
 	check(IsValid(RenderTarget));
 
+	UMaterialInstanceDynamic* DynamicMaterial = Mesh->CreateDynamicMaterialInstance(0);
+
 	if (IsValid(LinkedPortal))
 	{
-		UMaterialInstanceDynamic* DynamicMaterial = Mesh->CreateDynamicMaterialInstance(0);
-
-		DynamicMaterial->SetTextureParameterValue("PortalTexture", RenderTarget);
-		Mesh->SetMaterial(0, DynamicMaterial);
+		DynamicMaterial->SetVectorParameterValue("Color", Color);
+		DynamicMaterial->SetTextureParameterValue("View", LinkedPortal->GetRenderTarget());
+		DynamicMaterial->SetScalarParameterValue("ViewOpacity", 1.f);
 	}
-	else Mesh->SetMaterial(0, EmptyMaterial);
+	else
+	{
+		DynamicMaterial->SetVectorParameterValue("Color", Color);
+		DynamicMaterial->SetScalarParameterValue("ViewOpacity", 0.f);
+	}
+}
+
+void APPortal::UpdateTrigger() const
+{
+	Trigger->SetCollisionResponseToChannel(ECC_Pawn, IsValid(LinkedPortal) ? ECR_Overlap : ECR_Ignore);
 }
 
 void APPortal::UpdateCamera()
@@ -160,7 +214,6 @@ void APPortal::CheckTransition()
 				Character->GetControlRotation().Quaternion());
 			FRotator NewControlRotation = LinkedPortal->GetTransform().TransformRotation(RelativeControlRotation).
 			                                            Rotator();
-			NewControlRotation.Roll = 0.f;
 
 			FVector NewVelocity = LinkedPortal->GetTransform().TransformVector(RelativeVelocity);
 
@@ -200,35 +253,22 @@ void APPortal::OnTriggerEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* 
 	}
 }
 
-void APPortal::OnRep_Surface()
-{
-	Trigger->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-}
-
 void APPortal::OnRep_LinkedPortal()
 {
-	if (IsValid(LinkedPortal))
-	{
-		USceneCaptureComponent2D* LinkedPortalSceneCaptureComponent = LinkedPortal->GetSceneCaptureComponent();
-		check(IsValid(LinkedPortalSceneCaptureComponent));
-
-		LinkedPortalSceneCaptureComponent->TextureTarget = RenderTarget;
-	}
-
 	UpdateMaterial();
+	UpdateTrigger();
 }
 
 void APPortal::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-
 	CheckTransition();
 }
 
-void APPortal::MultiInitialize_Implementation(UMaterial* DefaultEmptyMaterial)
+void APPortal::MultiInitialize_Implementation(const FLinearColor& DefaultColor)
 {
-	InitializeDynamicTarget();
-	EmptyMaterial = DefaultEmptyMaterial;
+	InitializeRenderTarget();
+	Color = DefaultColor;
 	UpdateMaterial();
 }
 
@@ -244,7 +284,6 @@ void APPortal::AuthSetSurface(AActor* NewSurface)
 	if (!HasAuthority()) return;
 
 	Surface = NewSurface;
-	OnRep_Surface();
 }
 
 void APPortal::AuthSetLinkedPortal(APPortal* NewLinkedPortal)

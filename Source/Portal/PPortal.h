@@ -1,13 +1,18 @@
 #pragma once
 
-#include <GameFramework/Actor.h>
-
 #include "CoreMinimal.h"
+
+#include "Components/RectLightComponent.h"
+
+#include "GameFramework/Actor.h"
+
 #include "PPortal.generated.h"
 
+class URectLightComponent;
 class APPortal;
 class UBoxComponent;
 class UArrowComponent;
+class USoundCue;
 
 struct FPostUpdateWorkTickFunction : FTickFunction
 {
@@ -61,6 +66,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, meta=(ClampMin=0.f, ClampMax=1.f))
 	float TeleportationThreshold;
 
+	UPROPERTY(EditDefaultsOnly)
+	USoundCue* EnterSound;
+
 	FLinearColor Color;
 
 	UPROPERTY(Replicated)
@@ -72,29 +80,32 @@ protected:
 	UPROPERTY()
 	UTextureRenderTarget2D* RenderTarget;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
 	UStaticMeshComponent* Mesh;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
 	USceneCaptureComponent2D* SceneCaptureComponent;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
 	UArrowComponent* Entrance;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
 	UBoxComponent* Trigger;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
 	UBoxComponent* FrameTop;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
 	UBoxComponent* FrameRight;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
 	UBoxComponent* FrameBottom;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
 	UBoxComponent* FrameLeft;
+
+	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+	URectLightComponent* Light;
 
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
@@ -102,6 +113,7 @@ protected:
 	void InitializeRenderTarget();
 	void UpdateMaterial() const;
 	void UpdateTrigger() const;
+	void UpdateLight() const { Light->SetLightColor(Color); }
 	void CheckTransition();
 
 private:

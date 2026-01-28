@@ -28,29 +28,37 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly)
 	UAnimMontage* FirstPersonFireMontage;
-	
+
 	UPROPERTY(EditDefaultsOnly)
-	TArray<USoundCue*> ShotSounds; 
-	
+	TArray<USoundCue*> ShotSounds;
+
 	UPROPERTY(EditDefaultsOnly)
 	TSubclassOf<APPortal> PortalClass;
-	
+
 	UPROPERTY(EditDefaultsOnly)
 	TArray<FLinearColor> Colors;
 
+	UPROPERTY(EditDefaultsOnly)
+	float GridSnapFactor;
+	
+	UPROPERTY(EditDefaultsOnly)
+	int32 PlacementCorrectionIterations;
+	
 	FHitResult LineTrace() const;
 
 	UFUNCTION(Server, Unreliable)
 	void ServerFire(const FHitResult& HitResult, int32 PortalID);
-	
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly)
 	void AuthSpawnOrUpdatePortal(const FHitResult& HitResult, int32 PortalID);
-	
+
+	bool CorrectPortalLocation(FTransform& Transform, const AActor* Surface);
+
 	UFUNCTION(NetMulticast, Unreliable)
 	void MultiFire(int32 PortalID);
 
 	void PlayShotEffects(int32 PortalID);
-	
+
 private:
 	UPROPERTY()
 	TArray<APPortal*> Portals;

@@ -1,8 +1,11 @@
 #include "PPortal.h"
 
+#include "Types.h"
+
 #include "Components/ArrowComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/RectLightComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
 
 #include "Engine/TextureRenderTarget2D.h"
@@ -11,9 +14,12 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PawnMovementComponent.h"
 
+#include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetRenderingLibrary.h"
 
 #include "Net/UnrealNetwork.h"
+
+#include "Sound/SoundCue.h"
 
 APPortal::APPortal()
 {
@@ -68,9 +74,14 @@ APPortal::APPortal()
 	{
 		Frame->SetupAttachment(RootComponent);
 		Frame->SetCollisionProfileName("BlockAllDynamic");
-		Frame->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
+		Frame->SetCollisionResponseToChannel(ECC_PORTAL, ECR_Ignore);
 		Frame->ShapeColor = FColor::Red;
 	}
+
+	Light = CreateDefaultSubobject<URectLightComponent>("Light");
+	Light->SetupAttachment(RootComponent);
+	Light->SetIntensity(50.f);
+	Light->SetAttenuationRadius(200.f);
 }
 
 void APPortal::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -108,6 +119,10 @@ void APPortal::OnConstruction(const FTransform& Transform)
 
 	Trigger->SetBoxExtent(FVector(HalfTriggerLength, HalfWidth, HalfHeight));
 	Trigger->SetRelativeLocation(FVector::ZeroVector);
+
+	Light->SetSourceHeight(Height);
+	Light->SetSourceWidth(Width);
+	Light->SetRelativeLocation(FVector::ZeroVector);
 }
 
 void APPortal::BeginPlay()
@@ -189,6 +204,8 @@ void APPortal::UpdateCamera()
 
 void APPortal::CheckTransition()
 {
+	check(IsValid(EnterSound))
+
 	if (!IsValid(LinkedPortal)) return;
 
 	TArray<AActor*> ActorsInTrigger;
@@ -198,7 +215,7 @@ void APPortal::CheckTransition()
 	{
 		ACharacter* Character = Cast<ACharacter>(Actor);
 
-		if (!HasAuthority() && !Character->IsLocallyControlled()) continue;
+		if (/*!HasAuthority() && */!Character->IsLocallyControlled()) continue;
 
 		FVector RelativePosition = GetTransform().InverseTransformPosition(Character->GetActorLocation());
 		FVector RelativeVelocity = Entrance->GetComponentTransform().InverseTransformVector(
@@ -226,7 +243,11 @@ void APPortal::CheckTransition()
 			Character->SetActorLocation(NewLocation);
 			Character->GetMovementComponent()->Velocity = NewVelocity;
 			Character->GetCharacterMovement()->UpdateComponentVelocity();
+
+			UGameplayStatics::PlaySound2D(this, EnterSound);
 		}
+
+		break;
 	}
 }
 
@@ -270,6 +291,7 @@ void APPortal::MultiInitialize_Implementation(const FLinearColor& DefaultColor)
 	InitializeRenderTarget();
 	Color = DefaultColor;
 	UpdateMaterial();
+	UpdateLight();
 }
 
 void FPostUpdateWorkTickFunction::ExecuteTick(float DeltaTime, ELevelTick TickType, ENamedThreads::Type CurrentThread,

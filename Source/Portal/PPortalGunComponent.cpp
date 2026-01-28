@@ -2,8 +2,11 @@
 
 #include "PCharacter.h"
 #include "PPortal.h"
+#include "Types.h"
 
 #include "Camera/CameraComponent.h"
+
+#include "Engine/OverlapResult.h"
 
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetMathLibrary.h"
@@ -17,6 +20,8 @@ UPPortalGunComponent::UPPortalGunComponent()
 	SetIsReplicated(true);
 
 	Colors = {FLinearColor::Red, FLinearColor::Blue};
+	GridSnapFactor = 10.f;
+	PlacementCorrectionIterations = 10;
 }
 
 void UPPortalGunComponent::BeginPlay()
@@ -95,9 +100,9 @@ FHitResult UPPortalGunComponent::LineTrace() const
 
 	FHitResult HitResult;
 	UKismetSystemLibrary::LineTraceSingle(this, Camera->GetComponentLocation(), End,
-	                                      UEngineTypes::ConvertToTraceType(ECC_GameTraceChannel1),
+	                                      UEngineTypes::ConvertToTraceType(ECC_PORTAL),
 	                                      false,
-	                                      TArray<AActor*>{OwningCharacter}, EDrawDebugTrace::ForDuration, HitResult,
+	                                      {OwningCharacter}, EDrawDebugTrace::ForDuration, HitResult,
 	                                      true,
 	                                      FLinearColor::Red, FLinearColor::Green, 3.f);
 
@@ -115,12 +120,11 @@ void UPPortalGunComponent::AuthSpawnOrUpdatePortal(const FHitResult& HitResult, 
 	const FVector RelativeToSurface = SurfaceWorldOrigin.InverseTransformPosition(HitResult.Location);
 	const FVector GriSnapped(
 		RelativeToSurface.X,
-		FMath::GridSnap(RelativeToSurface.Y, 100.f),
-		FMath::GridSnap(RelativeToSurface.Z, 100.f)
+		FMath::GridSnap(RelativeToSurface.Y, GridSnapFactor),
+		FMath::GridSnap(RelativeToSurface.Z, GridSnapFactor)
 	);
 	const FVector PortalLocation = SurfaceWorldOrigin.TransformPosition(GriSnapped) + (HitResult.ImpactNormal *
 		0.1f);
-	// const FVector PortalLocation = (HitResult.ImpactPoint) + (HitResult.ImpactNormal * 0.1f);
 
 	FRotator PortalRotation = HitResult.ImpactNormal.Rotation();
 
@@ -129,11 +133,10 @@ void UPPortalGunComponent::AuthSpawnOrUpdatePortal(const FHitResult& HitResult, 
 		PortalRotation.Yaw = (HitResult.TraceStart - HitResult.ImpactPoint).Rotation().Yaw;
 	}
 
-	const FTransform PortalTransform(PortalRotation, PortalLocation);
-
+	FTransform PortalTransform(PortalRotation, PortalLocation);
+	if (!CorrectPortalLocation(PortalTransform, Surface)) return;
 
 	APPortal* Portal = Portals[PortalID];
-
 	if (!IsValid(Portal))
 	{
 		APPortal* LinkedPortal = Portals[PortalID == 0 ? 1 : 0];
@@ -153,6 +156,104 @@ void UPPortalGunComponent::AuthSpawnOrUpdatePortal(const FHitResult& HitResult, 
 		Portal->SetActorTransform(PortalTransform);
 		Portal->AuthSetSurface(Surface);
 	}
+}
+
+bool UPPortalGunComponent::CorrectPortalLocation(FTransform& Transform, const AActor* Surface)
+{
+	const float HalfHeight = 215.f / 2.f; // TODO replace with real values
+	const float HalfWidth = 115.f / 2.f; // TODO replace with real values
+	FVector BoxExtent = FVector::OneVector;
+	FCollisionShape BoxShape = FCollisionShape::MakeBox(BoxExtent);
+
+	for (int32 i = 0; i < PlacementCorrectionIterations; ++i)
+	{
+		FVector Location = Transform.GetLocation();
+		FQuat Rotation = Transform.GetRotation();
+		FVector RightVector = Rotation.GetRightVector();
+		FVector UpVector = Rotation.GetUpVector();
+
+		FVector VerticalOffset = UpVector * (HalfHeight - GridSnapFactor);
+		FVector HorizontalOffset = RightVector * (HalfWidth - GridSnapFactor);
+
+		TArray<FOverlapResult> TopOverlaps;
+		FVector TopLocation = Location + VerticalOffset;
+		GetWorld()->OverlapMultiByChannel(TopOverlaps, TopLocation, Rotation, ECC_PORTAL, BoxShape);
+
+		TArray<FOverlapResult> TopRightOverlaps;
+		FVector TopRightLocation = Location + VerticalOffset - HorizontalOffset;
+		GetWorld()->OverlapMultiByChannel(TopRightOverlaps, TopRightLocation, Rotation, ECC_PORTAL,
+		                                  BoxShape);
+
+		TArray<FOverlapResult> RightOverlaps;
+		FVector RightLocation = Location - HorizontalOffset;
+		GetWorld()->OverlapMultiByChannel(RightOverlaps, RightLocation, Rotation, ECC_PORTAL, BoxShape);
+
+		TArray<FOverlapResult> BottomRightOverlaps;
+		FVector BottomRightLocation = Location - VerticalOffset - HorizontalOffset;
+		GetWorld()->OverlapMultiByChannel(BottomRightOverlaps, BottomRightLocation, Rotation, ECC_PORTAL,
+		                                  BoxShape);
+
+		TArray<FOverlapResult> BottomOverlaps;
+		FVector BottomLocation = Location - VerticalOffset;
+		GetWorld()->OverlapMultiByChannel(BottomOverlaps, BottomLocation, Rotation, ECC_PORTAL, BoxShape);
+
+		TArray<FOverlapResult> BottomLeftOverlaps;
+		FVector BottomLeftLocation = Location - VerticalOffset + HorizontalOffset;
+		GetWorld()->OverlapMultiByChannel(BottomLeftOverlaps, BottomLeftLocation, Rotation, ECC_PORTAL,
+		                                  BoxShape);
+
+		TArray<FOverlapResult> LeftOverlaps;
+		FVector LeftLocation = Location + HorizontalOffset;
+		GetWorld()->OverlapMultiByChannel(LeftOverlaps, LeftLocation, Rotation, ECC_PORTAL, BoxShape);
+
+		TArray<FOverlapResult> TopLeftOverlaps;
+		FVector TopLeftLocation = Location + VerticalOffset + HorizontalOffset;
+		GetWorld()->OverlapMultiByChannel(TopLeftOverlaps, TopLeftLocation, Rotation, ECC_PORTAL, BoxShape);
+
+		DrawDebugBox(GetWorld(), TopLocation, BoxExtent, Rotation, FColor::Red, false, 3.f);
+		DrawDebugBox(GetWorld(), TopRightLocation, BoxExtent, Rotation, FColor::Red, false, 3.f);
+		DrawDebugBox(GetWorld(), RightLocation, BoxExtent, Rotation, FColor::Red, false, 3.f);
+		DrawDebugBox(GetWorld(), BottomRightLocation, BoxExtent, Rotation, FColor::Red, false, 3.f);
+		DrawDebugBox(GetWorld(), BottomLocation, BoxExtent, Rotation, FColor::Red, false, 3.f);
+		DrawDebugBox(GetWorld(), BottomLeftLocation, BoxExtent, Rotation, FColor::Red, false, 3.f);
+		DrawDebugBox(GetWorld(), LeftLocation, BoxExtent, Rotation, FColor::Red, false, 3.f);
+		DrawDebugBox(GetWorld(), TopLeftLocation, BoxExtent, Rotation, FColor::Red, false, 3.f);
+
+		bool ShouldNudgeTop = BottomOverlaps.Num() != 1 || BottomOverlaps[0].GetActor() != Surface;
+		bool ShouldNudgeTopRight = BottomLeftOverlaps.Num() != 1 || BottomLeftOverlaps[0].GetActor() != Surface;
+		bool ShouldNudgeRight = LeftOverlaps.Num() != 1 || LeftOverlaps[0].GetActor() != Surface;
+		bool ShouldNudgeBottomRight = TopLeftOverlaps.Num() != 1 || TopLeftOverlaps[0].GetActor() != Surface;
+		bool ShouldNudgeBottom = TopOverlaps.Num() != 1 || TopOverlaps[0].GetActor() != Surface;
+		bool ShouldNudgeBottomLeft = TopRightOverlaps.Num() != 1 || TopRightOverlaps[0].GetActor() != Surface;
+		bool ShouldNudgeLeft = RightOverlaps.Num() != 1 || RightOverlaps[0].GetActor() != Surface;
+		bool ShouldNudgeTopLeft = BottomRightOverlaps.Num() != 1 || BottomRightOverlaps[0].GetActor() != Surface;
+
+		int32 NudgeTopPriority = (ShouldNudgeTop ? 1 : 0) + (ShouldNudgeTopRight || ShouldNudgeTopLeft ? 1 : 0);
+		int32 NudgeRightPriority = (ShouldNudgeRight ? 1 : 0) + (ShouldNudgeTopRight || ShouldNudgeBottomRight ? 1 : 0);
+		int32 NudgeBottomPriority = (ShouldNudgeBottom ? 1 : 0) + (ShouldNudgeBottomRight || ShouldNudgeBottomLeft
+			                                                           ? 1
+			                                                           : 0);
+		int32 NudgeLeftPriority = (ShouldNudgeLeft ? 1 : 0) + (ShouldNudgeTopLeft || ShouldNudgeBottomLeft ? 1 : 0);
+		int32 MaxNudgePriority = FMath::Max(NudgeTopPriority, NudgeRightPriority, NudgeBottomPriority,
+		                                    NudgeLeftPriority);
+
+		if (MaxNudgePriority == 0) return true;
+
+		if (MaxNudgePriority == NudgeTopPriority)
+			Transform.SetLocation(
+				Transform.GetLocation() + UpVector * GridSnapFactor);
+		if (MaxNudgePriority == NudgeRightPriority)
+			Transform.SetLocation(
+				Transform.GetLocation() - RightVector * GridSnapFactor);
+		if (MaxNudgePriority == NudgeBottomPriority)
+			Transform.SetLocation(
+				Transform.GetLocation() - UpVector * GridSnapFactor);
+		if (MaxNudgePriority == NudgeLeftPriority)
+			Transform.SetLocation(
+				Transform.GetLocation() + RightVector * GridSnapFactor);
+	}
+
+	return false;
 }
 
 void UPPortalGunComponent::PlayShotEffects(int32 PortalID)
@@ -177,7 +278,7 @@ void UPPortalGunComponent::ServerFire_Implementation(const FHitResult& HitResult
 
 void UPPortalGunComponent::MultiFire_Implementation(int32 PortalID)
 {
-	if (GetOwner()->GetLocalRole() == ROLE_AutonomousProxy)
+	if (!Cast<APawn>(GetOwner())->IsLocallyControlled())
 	{
 		PlayShotEffects(PortalID);
 	}
